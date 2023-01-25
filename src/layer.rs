@@ -5,7 +5,7 @@ use crate::node::Node;
 pub struct Layer {
 
     nodes: Vec<Node>,
-    n: usize, 
+    n: usize, //weights am 
 
     ndc: usize, //node count 
     bias: Vec<f64>,
@@ -16,7 +16,7 @@ impl Layer {
 
     pub fn new(n: usize, x: usize) -> Layer {
 
-        Layer { nodes: Vec::with_capacity(n), n, ndc: x, bias: Vec::with_capacity(n)}
+        Layer { nodes: Vec::with_capacity(n), n, ndc: x, bias: Vec::with_capacity(x)}
         
     }
 
@@ -33,7 +33,20 @@ impl Layer {
 
     }
 
-    pub fn feed(&self, input: &Vec<f64>, out: &mut Vec<f64>) {
+    //feed the hungry chomik :sadge:
+    pub fn feed(&self, input: &[f64], out: &mut Vec<f64>) {
+        
+        let mut off: usize = 0;
+
+        for i in 0_usize..self.ndc {
+
+            out.push(self.bias[i]);
+            for j in 0_usize..self.n {
+                out[off+i] += input[j] * self.nodes[j].w[i];
+            }
+
+            off += 1;
+        }
 
     }
 
