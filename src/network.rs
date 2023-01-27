@@ -59,4 +59,30 @@ impl<'a> Network<'a> {
 
     }
 
+    fn calc_delta(&self, actv: &[f64], crt: &[f64], out: &mut Vec<f64>) {
+
+    }
+
+    fn apply_change(&mut self, dlt: &Vec<f64>, lr: f64) {
+
+    }
+
+    pub fn learn(&mut self, inp: &Vec<f64>, correct: &Vec<f64>, n_epochs: usize, lr: f64) {
+
+        let elm_am: usize = correct.len() / self.shape_out;
+
+        for e in 0..n_epochs {
+            
+            //shuffle, calculate delta, apply change, repeat
+
+        }
+
+    }
+
+    fn helper_shuffle_in(&self, arg1: &mut Vec<f64>, arg2: &mut Vec<f64>) {
+
+        let el_am: usize = arg1.len() / self.shape_in;
+
+    }
+
 }
