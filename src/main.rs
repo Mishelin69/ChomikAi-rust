@@ -9,9 +9,8 @@ fn main() {
     let mut network = Network::new(&[2, 2, 1]);
     network.init_self();
 
-    let inp: [f64; 8] = [1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
-    let expc: [f64; 4] = [0.0, 0.0, 1.0, 1.0];
+    let mut inp = vec![1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+    let mut expc = vec![0.0, 0.0, 1.0, 1.0];
 
-    let mut v: Vec<f64> = Vec::new();
-    network.feedforward(&inp, &mut v);
+    network.learn(&mut inp, &mut expc, 10, 0.1);
 }

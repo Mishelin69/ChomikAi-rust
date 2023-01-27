@@ -1,4 +1,4 @@
-use rand::{rngs::ThreadRng, Rng};
+use rand::{rngs::ThreadRng, Rng, thread_rng};
 
 use crate::layer::Layer;
 
@@ -42,41 +42,84 @@ impl<'a> Network<'a> {
 
     }
 
-    pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>) {
+    pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>, rev: bool) {
 
         let elm: usize = input.len() / self.shape_in;
 
-        for x in 0..elm-1 {
+        for x in 0..elm {
 
             let mut layers = self.layers.iter();
             layers.next().unwrap().feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
 
             while let Some(layer) = layers.next() {
-
                 layer.feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
-
             }
-
         }
 
+        if rev {
+            out.reverse();
+        }
     }
 
     fn calc_delta(&self, actv: &[f64], crt: &[f64], out: &mut Vec<f64>) {
 
+        let mut off: usize = actv.len();
+        let mut layers_reversed = self.layers.iter().rev();
+        let last_layer = layers_reversed.next().unwrap();
+
+        //calc error in output layer 
+        for i in 0..*self.shape_out {
+            out.push((crt[i] - actv[(off - self.shape_out) + i]) * last_layer.run_der(actv[i]));
+        }
+
+        off -= self.shape_out;
+        let mut out_off: usize = 0;
+        let mut last_layer_nodes = last_layer.ndc;
+
+        //calc error in the rest
+        while let Some(layer) = layers_reversed.next() {
+
+            for i in 0..layer.ndc {
+
+                let mut err: f64 = 0.0;
+                for j in 0..last_layer_nodes {
+                    err += out[out_off + j] * layer.nodes[i].w[j];
+                }
+                out.push(err * layer.run_der(actv[(off - layer.ndc) + i]));
+            }
+
+            out_off += layer.ndc; 
+            off -= layer.ndc;
+            last_layer_nodes = layer.ndc;
+        }
     }
 
     fn apply_change(&mut self, dlt: &Vec<f64>, lr: f64) {
 
     }
 
-    pub fn learn(&mut self, inp: &Vec<f64>, correct: &Vec<f64>, n_epochs: usize, lr: f64) {
+    pub fn learn(&mut self, inp: &mut Vec<f64>, correct: &mut Vec<f64>, n_epochs: usize, lr: f64) {
 
         let elm_am: usize = correct.len() / self.shape_out;
+        let mut rng = thread_rng();
+        let mut cur_pred: Vec<f64> = Vec::with_capacity(self.nodes_total);
+        let mut out: Vec<f64> = Vec::with_capacity(self.nodes_total);
 
         for e in 0..n_epochs {
-            
-            //shuffle, calculate delta, apply change, repeat
+            for i in 0..elm_am {
+                 
+                //shuffle, calculate delta, apply change, repeat
+                self.helper_shuffle_in(inp, correct, &mut rng);
+                self.feedforward(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &mut cur_pred, false);
 
+                self.calc_delta(
+                    &cur_pred, 
+                    &correct[(i*self.shape_out)..((i+1)*self.shape_out)], 
+                    &mut out,
+                );
+
+                cur_pred.clear(); //maybe it fixes the bugged out chomik idk :xdd:
+            }
         }
 
     }
@@ -84,17 +127,16 @@ impl<'a> Network<'a> {
     fn helper_shuffle_in(&self, arg1: &mut Vec<f64>, arg2: &mut Vec<f64>, rng: &mut ThreadRng) {
 
         let el_am: usize = arg1.len() / self.shape_in;
-
         for i in 0..el_am {
-            
+
             let random_indx: usize = rng.gen_range(0..el_am-i) + i;
-            
+
             for x in 0..*self.shape_in {
-                arg1.swap(random_indx*self.shape_in + x, random_indx*self.shape_in + x);
+                arg1.swap(random_indx*self.shape_in + x, i*self.shape_in + x);
             }
 
             for y in 0..*self.shape_out {
-                arg2.swap(random_indx*self.shape_out + y, random_indx*self.shape_out + y);
+                arg2.swap(random_indx*self.shape_out + y, i*self.shape_out + y);
             }
 
         }

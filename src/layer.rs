@@ -4,13 +4,13 @@ use crate::{node::Node, func::{FunctionPair, FnOption}};
 
 pub struct Layer {
 
-    nodes: Vec<Node>,
-    n: usize, //weights am 
+    pub nodes: Vec<Node>,
+    pub n: usize, //weights am 
 
-    ndc: usize, //node count 
-    bias: Vec<f64>,
+    pub ndc: usize, //node count 
+    pub bias: Vec<f64>,
 
-    fp: FunctionPair,
+    pub fp: FunctionPair,
 
 }
 
@@ -47,10 +47,19 @@ impl Layer {
                 out[off] += input[j] * self.nodes[j].w[i];
             }
 
-            out[off] = (self.fp.actv)(out[off]);
+            out[off] = self.run_actv(out[off]);
             off += 1;
         }
 
     }
 
+    #[inline]
+    pub fn run_actv(&self, x: f64) -> f64 {
+        return (self.fp.actv)(x);
+    }
+
+    #[inline]
+    pub fn run_der(&self, x: f64) -> f64 {
+        return (self.fp.der)(x);
+    }
 }
