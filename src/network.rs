@@ -1,3 +1,5 @@
+use rand::{rngs::ThreadRng, Rng};
+
 use crate::layer::Layer;
 
 pub struct Network<'a> {
@@ -79,9 +81,23 @@ impl<'a> Network<'a> {
 
     }
 
-    fn helper_shuffle_in(&self, arg1: &mut Vec<f64>, arg2: &mut Vec<f64>) {
+    fn helper_shuffle_in(&self, arg1: &mut Vec<f64>, arg2: &mut Vec<f64>, rng: &mut ThreadRng) {
 
         let el_am: usize = arg1.len() / self.shape_in;
+
+        for i in 0..el_am {
+            
+            let random_indx: usize = rng.gen_range(0..el_am-i) + i;
+            
+            for x in 0..*self.shape_in {
+                arg1.swap(random_indx*self.shape_in + x, random_indx*self.shape_in + x);
+            }
+
+            for y in 0..*self.shape_out {
+                arg2.swap(random_indx*self.shape_out + y, random_indx*self.shape_out + y);
+            }
+
+        }
 
     }
 
