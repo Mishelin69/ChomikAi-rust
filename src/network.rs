@@ -42,7 +42,20 @@ impl<'a> Network<'a> {
 
     pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>) {
 
-        let mut off: usize = 0;
+        let elm: usize = input.len() / self.shape_in;
+
+        for x in 0..elm-1 {
+
+            let mut layers = self.layers.iter();
+            layers.next().unwrap().feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
+
+            while let Some(layer) = layers.next() {
+
+                layer.feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
+
+            }
+
+        }
 
     }
 
