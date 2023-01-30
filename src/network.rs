@@ -61,6 +61,32 @@ impl<'a> Network<'a> {
         }
     }
 
+    pub fn feedforward_lastonly(&self, input: &[f64], out: &mut Vec<f64>, rev: bool) -> Vec<f64> {
+
+        let elm: usize = input.len() / self.shape_in;
+        let mut last = Vec::new();
+
+        for x in 0..elm {
+
+            let mut layers = self.layers.iter();
+            layers.next().unwrap().feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
+
+            while let Some(layer) = layers.next() {
+                layer.feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
+            }
+
+            for i in 0..*self.shape_out {
+                last.push(out[out.len() - self.shape_out + i]);
+            }
+        }
+
+        if rev {
+            out.reverse();
+        }
+
+        last
+    }
+
     fn calc_delta(&self, actv: &[f64], crt: &[f64], out: &mut Vec<f64>) {
 
         let mut off: usize = actv.len();
@@ -76,7 +102,7 @@ impl<'a> Network<'a> {
         let mut out_off: usize = 0;
         let mut last_layer_nodes = last_layer.ndc;
 
-        //calc error in the rest
+        //calc error in the rest, stop at input 
         while let Some(layer) = layers_reversed.next() {
 
             for i in 0..layer.ndc {
@@ -94,8 +120,42 @@ impl<'a> Network<'a> {
         }
     }
 
-    fn apply_change(&mut self, dlt: &Vec<f64>, lr: f64) {
+    fn apply_change(&mut self, input: &[f64], actv: &[f64], dlt: &Vec<f64>, lr: f64) {
 
+        let mut layer_ref = self.layers.iter_mut().rev();
+        let mut off: usize = actv.len() - self.shape_out;
+        let mut dlt_off: usize = 0;
+
+        for _ in 0..self.layers_total-1 {
+
+            let layer = layer_ref.next().unwrap();
+            for i in 0..layer.ndc {
+
+                layer.bias[i] += dlt[dlt_off + i] * lr;
+
+                for j in 0..layer.n {
+
+                    layer.nodes[j].w[i] += actv[(off - layer.ndc) + j] * dlt[dlt_off + i] * lr;
+
+                }
+            }
+
+            off -= layer.ndc;
+            dlt_off += layer.ndc;
+        }
+
+        let last_layer = layer_ref.next().unwrap();
+
+        for i in 0..last_layer.ndc  {
+
+            last_layer.bias[i] += dlt[off + i] * lr;
+
+            for j in 0..last_layer.n {
+
+                last_layer.nodes[j].w[i] += input[j] * dlt[dlt_off + i] * lr;
+
+            }
+        }
     }
 
     pub fn learn(&mut self, inp: &mut Vec<f64>, correct: &mut Vec<f64>, n_epochs: usize, lr: f64) {
@@ -105,9 +165,9 @@ impl<'a> Network<'a> {
         let mut cur_pred: Vec<f64> = Vec::with_capacity(self.nodes_total);
         let mut out: Vec<f64> = Vec::with_capacity(self.nodes_total);
 
-        for e in 0..n_epochs {
+        for _ in 0..n_epochs {
             for i in 0..elm_am {
-                 
+
                 //shuffle, calculate delta, apply change, repeat
                 self.helper_shuffle_in(inp, correct, &mut rng);
                 self.feedforward(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &mut cur_pred, false);
@@ -118,7 +178,10 @@ impl<'a> Network<'a> {
                     &mut out,
                 );
 
+                self.apply_change(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &cur_pred, &out, lr);
+
                 cur_pred.clear(); //maybe it fixes the bugged out chomik idk :xdd:
+                out.clear();
             }
         }
 
