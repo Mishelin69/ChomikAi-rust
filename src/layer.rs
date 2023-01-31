@@ -39,6 +39,7 @@ impl Layer {
     pub fn feed(&self, input: &[f64], out: &mut Vec<f64>) {
 
         let mut off: usize = out.len();
+        println!("START : {}", self.n);
 
         for i in 0_usize..self.ndc {
 
@@ -50,7 +51,6 @@ impl Layer {
             out[off] = self.run_actv(out[off]);
             off += 1;
         }
-
     }
 
     #[inline]

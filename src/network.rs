@@ -45,14 +45,41 @@ impl<'a> Network<'a> {
     pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>, rev: bool) {
 
         let elm: usize = input.len() / self.shape_in;
+        let mut off: usize = 0;
+        let mut last_layer_nodes: usize = 0;
 
-        for x in 0..elm {
+        for _ in 0..elm {
 
             let mut layers = self.layers.iter();
-            layers.next().unwrap().feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
+            let last_layer = layers.next().unwrap();
+
+            for i in 0_usize..last_layer.ndc {
+
+                out.push(last_layer.bias[i]);
+                for j in 0_usize..last_layer.n {
+                    out[off] += input[j] * last_layer.nodes[j].w[i];
+                }
+
+                out[off] = last_layer.run_actv(out[off]);
+                off += 1;
+            }
+
+            last_layer_nodes += last_layer.ndc;
 
             while let Some(layer) = layers.next() {
-                layer.feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
+
+                for i in 0_usize..layer.ndc {
+
+                    out.push(layer.bias[i]);
+                    for j in 0_usize..layer.n {
+                        out[off] += out[off - last_layer_nodes + j] * layer.nodes[j].w[i];
+                    }
+
+                    out[off] = layer.run_actv(out[off]);
+                    off += 1;
+                }
+
+                last_layer_nodes = layer.ndc;
             }
         }
 
@@ -92,6 +119,7 @@ impl<'a> Network<'a> {
         let mut off: usize = actv.len();
         let mut layers_reversed = self.layers.iter().rev();
         let last_layer = layers_reversed.next().unwrap();
+        println!("LEN: {}", actv.len());
 
         //calc error in output layer 
         for i in 0..*self.shape_out {
@@ -176,7 +204,7 @@ impl<'a> Network<'a> {
                     &cur_pred, 
                     &correct[(i*self.shape_out)..((i+1)*self.shape_out)], 
                     &mut out,
-                );
+                    );
 
                 self.apply_change(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &cur_pred, &out, lr);
 
