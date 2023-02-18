@@ -42,11 +42,10 @@ impl<'a> Network<'a> {
 
     }
 
-    pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>, rev: bool) {
+    pub fn feedforward(&self, input: &[f64], out: &mut Vec<Vec<f64>>, rev: bool) {
 
         let elm: usize = input.len() / self.shape_in;
         let mut off: usize = 0;
-        let mut last_layer_nodes: usize = 0;
 
         for _ in 0..elm {
 
@@ -55,31 +54,29 @@ impl<'a> Network<'a> {
 
             for i in 0_usize..last_layer.ndc {
 
-                out.push(last_layer.bias[i]);
+                out[off].push(last_layer.bias[i]);
                 for j in 0_usize..last_layer.n {
-                    out[off] += input[j] * last_layer.nodes[j].w[i];
+                    out[off][i] += input[j] * last_layer.nodes[j].w[i];
                 }
 
-                out[off] = last_layer.run_actv(out[off]);
-                off += 1;
+                out[off][i] = last_layer.run_actv(out[off][i]);
             }
 
-            last_layer_nodes += last_layer.ndc;
+            off += 1;
 
             while let Some(layer) = layers.next() {
 
                 for i in 0_usize..layer.ndc {
 
-                    out.push(layer.bias[i]);
+                    out[off].push(layer.bias[i]);
                     for j in 0_usize..layer.n {
-                        out[off] += out[off - last_layer_nodes + j] * layer.nodes[j].w[i];
+                        out[off][i] += out[off-1][j] * layer.nodes[j].w[i];
                     }
 
-                    out[off] = layer.run_actv(out[off]);
-                    off += 1;
+                    out[off][i] = layer.run_actv(out[off][i]);
                 }
 
-                last_layer_nodes = layer.ndc;
+                off += 1;
             }
         }
 
@@ -88,47 +85,19 @@ impl<'a> Network<'a> {
         }
     }
 
-    pub fn feedforward_lastonly(&self, input: &[f64], out: &mut Vec<f64>, rev: bool) -> Vec<f64> {
+    fn calc_delta(&self, actv: &[Vec<f64>], crt: &[f64], out: &mut Vec<Vec<f64>>) {
 
-        let elm: usize = input.len() / self.shape_in;
-        let mut last = Vec::new();
-
-        for x in 0..elm {
-
-            let mut layers = self.layers.iter();
-            layers.next().unwrap().feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
-
-            while let Some(layer) = layers.next() {
-                layer.feed(&input[x*self.shape_in..(x+1)*self.shape_in], out);
-            }
-
-            for i in 0..*self.shape_out {
-                last.push(out[out.len() - self.shape_out + i]);
-            }
-        }
-
-        if rev {
-            out.reverse();
-        }
-
-        last
-    }
-
-    fn calc_delta(&self, actv: &[f64], crt: &[f64], out: &mut Vec<f64>) {
-
-        let mut off: usize = actv.len();
+        let mut off: usize = 0;
         let mut layers_reversed = self.layers.iter().rev();
-        let last_layer = layers_reversed.next().unwrap();
-        println!("LEN: {}", actv.len());
+        let mut last_layer = layers_reversed.next().unwrap();
 
         //calc error in output layer 
-        for i in 0..*self.shape_out {
-            out.push((crt[i] - actv[(off - self.shape_out) + i]) * last_layer.run_der(actv[i]));
+        for i in 0..last_layer.ndc {
+            out[off].push((crt[i] - actv[off][i]) * last_layer.run_der(actv[off][i]));
         }
 
-        off -= self.shape_out;
-        let mut out_off: usize = 0;
         let mut last_layer_nodes = last_layer.ndc;
+        off += 1;
 
         //calc error in the rest, stop at input 
         while let Some(layer) = layers_reversed.next() {
@@ -137,51 +106,44 @@ impl<'a> Network<'a> {
 
                 let mut err: f64 = 0.0;
                 for j in 0..last_layer_nodes {
-                    err += out[out_off + j] * layer.nodes[i].w[j];
+                    err += out[off-1][j] * last_layer.nodes[i].w[j];
                 }
-                out.push(err * layer.run_der(actv[(off - layer.ndc) + i]));
+
+                out[off].push(err * layer.run_der(actv[off][i]));
             }
 
-            out_off += layer.ndc; 
-            off -= layer.ndc;
+            off += 1;
             last_layer_nodes = layer.ndc;
+            last_layer = layer;
         }
     }
 
-    fn apply_change(&mut self, input: &[f64], actv: &[f64], dlt: &Vec<f64>, lr: f64) {
+    fn apply_change(&mut self, input: &[f64], actv: &[Vec<f64>], dlt: &Vec<Vec<f64>>, lr: f64) {
 
         let mut layer_ref = self.layers.iter_mut().rev();
-        let mut off: usize = actv.len() - self.shape_out;
-        let mut dlt_off: usize = 0;
+        let mut off: usize = 0;
 
         for _ in 0..self.layers_total-1 {
 
             let layer = layer_ref.next().unwrap();
             for i in 0..layer.ndc {
 
-                layer.bias[i] += dlt[dlt_off + i] * lr;
-
+                layer.bias[i] += dlt[off][i] * lr;
                 for j in 0..layer.n {
-
-                    layer.nodes[j].w[i] += actv[(off - layer.ndc) + j] * dlt[dlt_off + i] * lr;
-
+                    layer.nodes[j].w[i] += actv[off+1][j] * dlt[off][i] * lr;
                 }
             }
 
-            off -= layer.ndc;
-            dlt_off += layer.ndc;
+            off += 1;
         }
 
         let last_layer = layer_ref.next().unwrap();
 
         for i in 0..last_layer.ndc  {
 
-            last_layer.bias[i] += dlt[off + i] * lr;
-
+            last_layer.bias[i] += dlt[off][i] * lr;
             for j in 0..last_layer.n {
-
-                last_layer.nodes[j].w[i] += input[j] * dlt[dlt_off + i] * lr;
-
+                last_layer.nodes[j].w[i] += input[j] * dlt[off][i] * lr;
             }
         }
     }
@@ -190,29 +152,46 @@ impl<'a> Network<'a> {
 
         let elm_am: usize = correct.len() / self.shape_out;
         let mut rng = thread_rng();
-        let mut cur_pred: Vec<f64> = Vec::with_capacity(self.nodes_total);
-        let mut out: Vec<f64> = Vec::with_capacity(self.nodes_total);
+        let mut cur_pred: Vec<Vec<f64>> = self.helper_init_actv(false);
+        let mut delta: Vec<Vec<f64>> = self.helper_init_actv(true); 
 
         for _ in 0..n_epochs {
             for i in 0..elm_am {
 
                 //shuffle, calculate delta, apply change, repeat
                 self.helper_shuffle_in(inp, correct, &mut rng);
-                self.feedforward(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &mut cur_pred, false);
+                self.feedforward(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &mut cur_pred, true);
 
                 self.calc_delta(
                     &cur_pred, 
                     &correct[(i*self.shape_out)..((i+1)*self.shape_out)], 
-                    &mut out,
+                    &mut delta,
                     );
 
-                self.apply_change(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &cur_pred, &out, lr);
+                self.apply_change(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &cur_pred, &delta, lr);
 
-                cur_pred.clear(); //maybe it fixes the bugged out chomik idk :xdd:
-                out.clear();
+                Self::clear_actv(&mut cur_pred);
+                Self::clear_actv(&mut delta);
             }
         }
+        println!("EXIT!!!!");
+    }
 
+    pub fn helper_init_actv(&self, rev: bool) -> Vec<Vec<f64>> {
+
+        let mut v = Vec::with_capacity(self.layers_total);
+
+        for l in &self.layers {
+
+            v.push(Vec::with_capacity(l.ndc));
+
+        }
+
+        if rev {
+            v.reverse()
+        }
+
+        v
     }
 
     fn helper_shuffle_in(&self, arg1: &mut Vec<f64>, arg2: &mut Vec<f64>, rng: &mut ThreadRng) {
@@ -232,6 +211,13 @@ impl<'a> Network<'a> {
 
         }
 
+    }
+
+    #[inline]
+    pub fn clear_actv(a: &mut Vec<Vec<f64>>) {
+        for x in a {
+            x.clear();
+        }
     }
 
 }
