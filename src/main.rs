@@ -25,7 +25,7 @@ fn main() {
         println!("IN: {:?}", inp);
         println!("OUT: {:?}", out);
 
-        Network::clear_actv(&mut out); 
+        //Network::clear_actv(&mut out); 
 
     }
 

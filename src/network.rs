@@ -46,6 +46,7 @@ impl<'a> Network<'a> {
 
         let elm: usize = input.len() / self.shape_in;
         let mut off: usize = 0;
+        let mut test_off: usize = 0;
 
         for _ in 0..elm {
 
@@ -54,7 +55,7 @@ impl<'a> Network<'a> {
 
             for i in 0_usize..last_layer.ndc {
 
-                out[off].push(last_layer.bias[i]);
+                out[off][i] = (last_layer.bias[i]);
                 for j in 0_usize..last_layer.n {
                     out[off][i] += input[j] * last_layer.nodes[j].w[i];
                 }
@@ -68,7 +69,7 @@ impl<'a> Network<'a> {
 
                 for i in 0_usize..layer.ndc {
 
-                    out[off].push(layer.bias[i]);
+                    out[off][i] = (layer.bias[i]);
                     for j in 0_usize..layer.n {
                         out[off][i] += out[off-1][j] * layer.nodes[j].w[i];
                     }
@@ -93,7 +94,7 @@ impl<'a> Network<'a> {
 
         //calc error in output layer 
         for i in 0..last_layer.ndc {
-            out[off].push((crt[i] - actv[off][i]) * last_layer.run_der(actv[off][i]));
+            out[off][i] = ((crt[i] - actv[off][i]) * last_layer.run_der(actv[off][i]));
         }
 
         let mut last_layer_nodes = last_layer.ndc;
@@ -109,7 +110,7 @@ impl<'a> Network<'a> {
                     err += out[off-1][j] * last_layer.nodes[i].w[j];
                 }
 
-                out[off].push(err * layer.run_der(actv[off][i]));
+                out[off][i] = (err * layer.run_der(actv[off][i]));
             }
 
             off += 1;
@@ -170,8 +171,9 @@ impl<'a> Network<'a> {
 
                 self.apply_change(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &cur_pred, &delta, lr);
 
-                Self::clear_actv(&mut cur_pred);
-                Self::clear_actv(&mut delta);
+                cur_pred.reverse();
+                // Self::clear_actv(&mut cur_pred);
+                // Self::clear_actv(&mut delta);
             }
         }
         println!("EXIT!!!!");
@@ -180,10 +182,13 @@ impl<'a> Network<'a> {
     pub fn helper_init_actv(&self, rev: bool) -> Vec<Vec<f64>> {
 
         let mut v = Vec::with_capacity(self.layers_total);
+        let mut i = 0;
 
         for l in &self.layers {
 
             v.push(Vec::with_capacity(l.ndc));
+            unsafe { v[i].set_len(l.ndc);}
+            i += 1_usize;
 
         }
 
