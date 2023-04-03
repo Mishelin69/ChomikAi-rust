@@ -55,7 +55,7 @@ impl<'a> Network<'a> {
 
             for i in 0_usize..last_layer.ndc {
 
-                out[off][i] = (last_layer.bias[i]);
+                out[off][i] = last_layer.bias[i];
                 for j in 0_usize..last_layer.n {
                     out[off][i] += input[j] * last_layer.nodes[j].w[i];
                 }
@@ -63,13 +63,14 @@ impl<'a> Network<'a> {
                 out[off][i] = last_layer.run_actv(out[off][i]);
             }
 
+            test_off += last_layer.ndc;
             off += 1;
 
             while let Some(layer) = layers.next() {
 
                 for i in 0_usize..layer.ndc {
 
-                    out[off][i] = (layer.bias[i]);
+                    out[off][i] = layer.bias[i];
                     for j in 0_usize..layer.n {
                         out[off][i] += out[off-1][j] * layer.nodes[j].w[i];
                     }
@@ -82,7 +83,9 @@ impl<'a> Network<'a> {
         }
 
         if rev {
+            println!("{:?}", out);
             out.reverse();
+            println!("{:?}", out);
         }
     }
 
@@ -94,7 +97,7 @@ impl<'a> Network<'a> {
 
         //calc error in output layer 
         for i in 0..last_layer.ndc {
-            out[off][i] = ((crt[i] - actv[off][i]) * last_layer.run_der(actv[off][i]));
+            out[off][i] = (crt[i] - actv[off][i]) * last_layer.run_der(actv[off][i]);
         }
 
         let mut last_layer_nodes = last_layer.ndc;
@@ -110,7 +113,7 @@ impl<'a> Network<'a> {
                     err += out[off-1][j] * last_layer.nodes[i].w[j];
                 }
 
-                out[off][i] = (err * layer.run_der(actv[off][i]));
+                out[off][i] = err * layer.run_der(actv[off][i]);
             }
 
             off += 1;
@@ -172,8 +175,6 @@ impl<'a> Network<'a> {
                 self.apply_change(&inp[(i*self.shape_in)..((i+1)*self.shape_in)], &cur_pred, &delta, lr);
 
                 cur_pred.reverse();
-                // Self::clear_actv(&mut cur_pred);
-                // Self::clear_actv(&mut delta);
             }
         }
         println!("EXIT!!!!");
