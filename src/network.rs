@@ -1,4 +1,7 @@
+use std::sync::Mutex;
+
 use rand::{rngs::ThreadRng, Rng, thread_rng};
+use rust_thread_pool;
 
 use crate::layer::Layer;
 
@@ -40,6 +43,9 @@ pub struct Network<'a> {
 
 impl<'a> Network<'a> {
 
+    ///Creates `not initialized` network with the giver parameters
+    /// 
+    ///`network shape` => should represent layers in the order left to right 
     pub fn new(network_shape: &'a [usize]) -> Network<'a> {
         Network { 
             layers: Vec::with_capacity(network_shape.len()), 
@@ -51,6 +57,7 @@ impl<'a> Network<'a> {
         } 
     }
 
+    ///Function initilizes network => creates nodes, biases, all is initialized with random valeus
     pub fn init_self(&mut self) {
 
         let mut i: usize = 0;
@@ -65,10 +72,18 @@ impl<'a> Network<'a> {
 
     }
 
+    ///Does pass through of a network with the given input.
+    ///`Note`: input in expected to be just one data block, not a whole bunch of them
+    /// 
+    ///`input` => input data for the network
+    /// 
+    ///`out` => activations are stored here
+    /// 
+    /// `Note`: no checks are done so random panics could happen resulting in a non-recoverable state
     pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>) {
 
         let elm: usize = input.len() / self.shape_in;
-        let mut off: usize = 0;
+        let mut off: usize = out.len();
         // let mut test_off: usize = 0;
 
         for _ in 0..elm {
@@ -119,13 +134,24 @@ impl<'a> Network<'a> {
         // }
     }
 
-    fn calc_delta(&self, actv: &Vec<f64>, crt: &[f64], out: &mut Vec<f64>) {
+    ///Calculates networks error on x dataset
+    ///
+    ///`actv` => x dataset pass through was done on
+    /// 
+    ///`crt` => expected output 
+    /// 
+    ///`out` => where output of this function is stored at
+    /// 
+    ///`nth` => n-th elm
+    /// 
+    ///`Note`: no checks are done so random panics could happen resulting in a non-recoverable state
+    fn calc_delta(&self, actv: &Vec<f64>, crt: &[f64], out: &mut Vec<f64>, nth: usize) {
 
         // let mut off: usize = 0;
         let mut layers_reversed = self.layers.iter().rev();
         let mut last_layer = layers_reversed.next().unwrap();
         // let mut test_out = Vec::<f64>::with_capacity(self.nodes_total); unsafe { test_out.set_len(self.nodes_total); }
-        let mut off: usize = self.nodes_total - last_layer.ndc;
+        let mut off: usize = (nth*self.nodes_total) - last_layer.ndc;
         let mut test_start = 0;
 
         //calc error in output layer 
@@ -164,11 +190,25 @@ impl<'a> Network<'a> {
         // println!("CMPR:\n{:?}\n{:?}", make_flat_copy(out, self.nodes_total), test_out);
     }
 
-    fn apply_change(&mut self, input: &[f64], actv: &Vec<f64>, dlt: &Vec<f64>, lr: f64) {
+    ///Takes input, corresponding activations, corresponding error to that dataset and corrects to network
+    ///using gradient descent function 
+    /// 
+    ///`input` => given input
+    /// 
+    ///`actv` => current networks pass throught of that input
+    /// 
+    ///`dlt` => corresponding calculater error
+    /// 
+    ///`nth` => n-th element
+    /// 
+    ///`lr` => learn rate
+    /// 
+    ///`Note`: no checks are done so random panics could happen resulting in a non-recoverable state
+    fn apply_change(&mut self, input: &[f64], actv: &Vec<f64>, dlt: &Vec<f64>, nth: usize, lr: f64) {
 
         let mut layer_ref = self.layers.iter_mut().rev();
-        let mut off: usize = self.nodes_total;
-        let mut dlt_off = 0;
+        let mut off: usize = nth*self.nodes_total;
+        let mut dlt_off = dlt.len();
 
         for _ in 0..self.layers_total-1 {
 
@@ -201,6 +241,17 @@ impl<'a> Network<'a> {
         }
     }
 
+    ///Trains the network with the data supplied
+    /// 
+    ///`inp` => input
+    /// 
+    ///`correct` => corresponding labels
+    /// 
+    ///`n_epochs` => number of epochs
+    /// 
+    ///`lr` => learn rate
+    ///
+    ///`Note`: no checks are done so random panics could happen resulting in a non-recoverable state
     pub fn learn(&mut self, inp: &mut Vec<f64>, correct: &mut Vec<f64>, n_epochs: usize, lr: f64) {
 
         let elm_am: usize = correct.len() / self.shape_out;
@@ -222,12 +273,14 @@ impl<'a> Network<'a> {
                     &cur_pred, 
                     &correct[(i*self.shape_out)..((i+1)*self.shape_out)], 
                     &mut delta,
+                    1
                     );
 
                 self.apply_change(
                     &inp[(i*self.shape_in)..((i+1)*self.shape_in)], 
                     &cur_pred, 
                     &delta, 
+                    1,
                     lr,
                 );
 
@@ -237,6 +290,9 @@ impl<'a> Network<'a> {
         println!("EXIT!!!!");
     }
 
+    ///Helper function used in `learn` method, initializes vector for activations and error
+    /// 
+    ///`rev` => should/should not reverse vector
     pub fn helper_init_actv(&self, rev: bool) -> Vec<f64> {
 
         let mut v = Vec::with_capacity(self.nodes_total);
@@ -249,9 +305,50 @@ impl<'a> Network<'a> {
         v
     }
 
-    pub fn multthrd_learn(&mut self, max_workers: usize, train_data: Vec<f64>, correct: Vec<f64>, epochs: usize, lr: f64) {
+    ///Multi-threaded version of the `learn` method, benefits in speed and uses batching
+    ///for more effecient data distribution and better correction
+    /// 
+    ///`max_workers` => max threads
+    /// 
+    ///`train_data` => `input` field in the `learn` method
+    /// 
+    ///`correct` => `correct` field in the `learn` method
+    /// 
+    ///`epochs` => `n_epochs` field in the `learn` method
+    /// 
+    ///`lr` => `lr` field in the `learn` method 
+    /// 
+    ///`batch_size` => batch size
+    pub fn multthrd_learn(&mut self, max_workers: usize, train_data: Vec<f64>, correct: Vec<f64>, epochs: usize, lr: f64, batch_size: usize) {
+
+        assert!(max_workers > 1 && max_workers < usize::from(std::thread::available_parallelism().unwrap()), "max_workers was zero or the number exceeded number of physical procesors");
+        //check if power of two
+        assert!(batch_size > 1 && (batch_size & (batch_size - 1) == 0));
+
+        let amount_input = train_data.len() / self.shape_in;
+        let amount_correct = correct.len() / self.shape_out;
+
+        assert!(amount_input == amount_correct && amount_input % batch_size == 0, "train_data and train labels don't have equal number of elements");
+
+        let thread_iters = (amount_input / batch_size) / max_workers;
+        let pool = rust_thread_pool::pool::ThreadPool::new(max_workers);
+        let pool_vectors: Vec<std::sync::Arc<Mutex<Vec<f64>>>> = Vec::with_capacity(max_workers);
+
+        for e in 0..epochs {
+            for elm in 0..thread_iters {
+
+
+            }
+        }
     }
 
+    ///Helper function that shuffles the input while making sure the labels match the new order
+    /// 
+    ///`arg1` => generally the input
+    /// 
+    ///`arg2` => generally the labels
+    /// 
+    ///`rng` => `ThreadRng` object to use
     fn helper_shuffle_in(&self, arg1: &mut Vec<f64>, arg2: &mut Vec<f64>, rng: &mut ThreadRng) {
 
         let el_am: usize = arg1.len() / self.shape_in;
@@ -271,6 +368,9 @@ impl<'a> Network<'a> {
 
     }
 
+    ///Clears given vector
+    /// 
+    ///`a` => vector to be cleared
     #[inline]
     pub fn clear_actv(a: &mut Vec<Vec<f64>>) {
         for x in a {
