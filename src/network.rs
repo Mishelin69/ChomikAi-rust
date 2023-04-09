@@ -331,7 +331,7 @@ impl<'a> Network<'a> {
         assert!(amount_input == amount_correct && amount_input % batch_size == 0, "train_data and train labels don't have equal number of elements");
 
         let thread_iters = (amount_input / batch_size) / max_workers;
-        let pool = rust_thread_pool::pool::ThreadPool::new(max_workers);
+        let pool = rust_thread_pool::pool::ThreadPool::<&[f64]>::new(max_workers);
         let pool_vectors: Vec<std::sync::Arc<Mutex<Vec<f64>>>> = Vec::with_capacity(max_workers);
 
         for e in 0..epochs {
