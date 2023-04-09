@@ -7,7 +7,7 @@ pub mod func;
 
 fn main() {
 
-    let mut network = Network::new(&[2, 200, 200, 1]);
+    let mut network = Network::new(&[2, 2, 1]);
     network.init_self();
 
     let mut inp = vec![1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
@@ -19,7 +19,7 @@ fn main() {
 
     for i in 0..4_usize {
 
-        network.feedforward(&inp[i*network.shape_in..(1+i)*network.shape_in], &mut out);
+        network.feedforward(&inp[i*network.shape_in..(1+i)*network.shape_in], &mut out, 0);
 
         println!("EXP: {:?}", expc);
         println!("IN: {:?}", inp);

@@ -80,10 +80,10 @@ impl<'a> Network<'a> {
     ///`out` => activations are stored here
     /// 
     /// `Note`: no checks are done so random panics could happen resulting in a non-recoverable state
-    pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>) {
+    pub fn feedforward(&self, input: &[f64], out: &mut Vec<f64>, nth: usize) {
 
         let elm: usize = input.len() / self.shape_in;
-        let mut off: usize = out.len();
+        let mut off: usize = nth*self.nodes_total;
         // let mut test_off: usize = 0;
 
         for _ in 0..elm {
@@ -208,7 +208,7 @@ impl<'a> Network<'a> {
 
         let mut layer_ref = self.layers.iter_mut().rev();
         let mut off: usize = nth*self.nodes_total;
-        let mut dlt_off = dlt.len();
+        let mut dlt_off = (nth-1)*self.nodes_total;
 
         for _ in 0..self.layers_total-1 {
 
@@ -258,6 +258,7 @@ impl<'a> Network<'a> {
         let mut rng = thread_rng();
         let mut cur_pred: Vec<f64> = self.helper_init_actv(false);
         let mut delta: Vec<f64> = self.helper_init_actv(false); 
+        let zero = 0;
 
         for _ in 0..n_epochs {
             for i in 0..elm_am {
@@ -267,6 +268,7 @@ impl<'a> Network<'a> {
                 self.feedforward(
                     &inp[(i*self.shape_in)..((i+1)*self.shape_in)], 
                     &mut cur_pred,
+                    zero,
                 );
 
                 self.calc_delta(
