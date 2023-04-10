@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc};
 
 use rand::{rngs::ThreadRng, Rng, thread_rng};
 use rust_thread_pool;
@@ -10,7 +10,6 @@ use crate::layer::Layer;
 TODO: 
   -> get rid of 2D arrays => reduce cache misses ✓
   -> rewrite `calc_delta` to work with the new system ✓
-  -> try to implement multithreaded front pass
   -> implement multithreaded  learning
   -> maybe improve performance somewhere else ✓ (by half actually [>=])
 <========================================================================================================>
@@ -321,25 +320,45 @@ impl<'a> Network<'a> {
     ///`lr` => `lr` field in the `learn` method 
     /// 
     ///`batch_size` => batch size
-    pub fn multthrd_learn(&mut self, max_workers: usize, train_data: Vec<f64>, correct: Vec<f64>, epochs: usize, lr: f64, batch_size: usize) {
+    pub fn multthrd_learn(&mut self, max_workers: usize, train_data: Arc<&Vec<f64>>, correct: Arc<&Vec<f64>>, epochs: usize, lr: f64, batch_size: usize) {
 
         assert!(max_workers > 1 && max_workers < usize::from(std::thread::available_parallelism().unwrap()), "max_workers was zero or the number exceeded number of physical procesors");
         //check if power of two
-        assert!(batch_size > 1 && (batch_size & (batch_size - 1) == 0));
+        assert!(batch_size >= 1 && (batch_size & (batch_size - 1) == 0));
 
         let amount_input = train_data.len() / self.shape_in;
         let amount_correct = correct.len() / self.shape_out;
 
-        assert!(amount_input == amount_correct && amount_input % batch_size == 0, "train_data and train labels don't have equal number of elements");
+        assert!((amount_input == amount_correct), "Number of elements in input and labels doesn't match, {} {}", amount_input, amount_correct);
 
-        let thread_iters = (amount_input / batch_size) / max_workers;
-        let pool = rust_thread_pool::pool::ThreadPool::<&[f64]>::new(max_workers);
-        let pool_vectors: Vec<std::sync::Arc<Mutex<Vec<f64>>>> = Vec::with_capacity(max_workers);
+        let batch_workers = batch_size*max_workers;
+        let thread_iters = amount_input / batch_workers;
+        let iters_left = amount_input % batch_workers;
+        let pool = rust_thread_pool::pool::ThreadPool::new(max_workers);
+        let mut pool_vectors: Vec<std::sync::Arc<Mutex<Vec<f64>>>> = Vec::with_capacity(max_workers);
+
+        for i in 0..max_workers {
+
+            pool_vectors.push(Arc::new(Mutex::new(Vec::with_capacity(self.nodes_total*batch_size))));
+
+            let x = &pool_vectors[i];
+            unsafe { 
+                let mut lock = x.lock().unwrap();
+                lock.set_len(self.nodes_total*batch_size);
+            }
+        }
 
         for e in 0..epochs {
             for elm in 0..thread_iters {
+                for thitr in 0..max_workers {
 
+                    let vector = Arc::clone(&pool_vectors[elm]);
+                    pool.execute(move || {
 
+                        let lock = vector.lock();
+
+                    });
+                }
             }
         }
     }

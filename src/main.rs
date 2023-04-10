@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use network::Network;
 
 pub mod network;
@@ -10,10 +12,12 @@ fn main() {
     let mut network = Network::new(&[2, 2, 1]);
     network.init_self();
 
-    let mut inp = vec![1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
-    let mut expc = vec![0.0, 0.0, 1.0, 1.0];
+    let inp = vec![1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+    let expc = vec![0.0, 0.0, 1.0, 1.0];
+    let inp_stat = Arc::new(&inp);
+    let expc_stat = Arc::new(&expc);
 
-    network.learn(&mut inp, &mut expc, 10000, 0.1);
+    network.multthrd_learn(4, Arc::clone(&inp_stat), Arc::clone(&expc_stat), 10000, 0.1, 1);
 
     let mut out: Vec<f64> = network.helper_init_actv(false);
 
