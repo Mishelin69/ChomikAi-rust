@@ -1,4 +1,5 @@
-use std::sync::{Mutex, Arc};
+use core::time;
+use std::{sync::{Mutex, Arc}, thread, time::Duration};
 
 use rand::{rngs::ThreadRng, Rng, thread_rng};
 use rust_thread_pool;
@@ -25,6 +26,18 @@ pub fn make_flat_copy(v: &[Vec<f64>], expc_s: usize) -> Vec<f64> {
         }
     }
     cpy
+}
+
+struct ThreadDatSync<T> {
+    pub dat: T,
+}
+
+impl<T> ThreadDatSync<T> {
+
+    pub fn new(dat: T) -> ThreadDatSync<T> {
+        ThreadDatSync { dat }
+    }
+
 }
 
 pub struct Network<'a> {
@@ -83,7 +96,6 @@ impl<'a> Network<'a> {
 
         let elm: usize = input.len() / self.shape_in;
         let mut off: usize = nth*self.nodes_total;
-        // let mut test_off: usize = 0;
 
         for _ in 0..elm {
 
@@ -92,45 +104,32 @@ impl<'a> Network<'a> {
 
             for i in 0_usize..last_layer.ndc {
 
-                // out[off][i] = last_layer.bias[i];
                 out[i] = last_layer.bias[i];
                 for j in 0_usize..last_layer.n {
-                    // out[off][i] += input[j] * last_layer.nodes[j].w[i];
                     out[off+i] += input[j] * last_layer.nodes[j].w[i];
                 }
 
                 out[off+i] = last_layer.run_actv(out[off+i]);
-                // out[off][i] = last_layer.run_actv(out[off][i]);
             }
 
             off += last_layer.ndc;
-            // off += 1;
 
             while let Some(layer) = layers.next() {
 
                 for i in 0_usize..layer.ndc {
 
-                    // out[off][i] = layer.bias[i];
                     out[off+i] = layer.bias[i];
                     for j in 0_usize..layer.n {
-                        // out[off][i] += out[off-1][j] * layer.nodes[j].w[i];
                         out[off+i] += out[off-last_layer.ndc+j] * layer.nodes[j].w[i];
                     }
 
                     out[off+i] = layer.run_actv(out[off+i]);
-                    // out[off][i] = layer.run_actv(out[off][i]);
                 }
 
                 off += layer.ndc;
-                // off += 1;
                 last_layer = &layer;
             }
         }
-        // println!("OUT: {:?}", out);
-
-        // if rev {
-        //     out.reverse();
-        // }
     }
 
     ///Calculates networks error on x dataset
@@ -146,22 +145,17 @@ impl<'a> Network<'a> {
     ///`Note`: no checks are done so random panics could happen resulting in a non-recoverable state
     fn calc_delta(&self, actv: &Vec<f64>, crt: &[f64], out: &mut Vec<f64>, nth: usize) {
 
-        // let mut off: usize = 0;
         let mut layers_reversed = self.layers.iter().rev();
         let mut last_layer = layers_reversed.next().unwrap();
-        // let mut test_out = Vec::<f64>::with_capacity(self.nodes_total); unsafe { test_out.set_len(self.nodes_total); }
         let mut off: usize = (nth*self.nodes_total) - last_layer.ndc;
         let mut test_start = 0;
 
-        //calc error in output layer 
         for i in 0..last_layer.ndc {
-            // out[off][i] = (crt[i] - actv[off][i]) * last_layer.run_der(actv[off][i]);
             out[test_start] = (crt[i] - actv[off + i]) * last_layer.run_der(actv[off + i]);
         }
         test_start += last_layer.ndc;
 
         let mut last_layer_nodes = last_layer.ndc;
-        // off += 1;
 
         //calc error in the rest, stop at input 
         while let Some(layer) = layers_reversed.next() {
@@ -170,23 +164,17 @@ impl<'a> Network<'a> {
             for i in 0..layer.ndc {
 
                 let mut err: f64 = 0.0;
-                // let mut test_err: f64 = 0.0;
                 for j in 0..last_layer_nodes {
-                    // err += out[off-1][j] * last_layer.nodes[i].w[j];
                     err += out[test_start - i - last_layer.ndc + j] * last_layer.nodes[i].w[j];
                 }
 
-                // println!("ERR CMP {} {}", err, test_err);
-                // out[off][i] = err * layer.run_der(actv[off][i]);
                 out[test_start] = err * layer.run_der(actv[off + i]);
                 test_start += 1;
             }
 
-            // off += 1;
             last_layer_nodes = layer.ndc;
             last_layer = layer;
         }
-        // println!("CMPR:\n{:?}\n{:?}", make_flat_copy(out, self.nodes_total), test_out);
     }
 
     ///Takes input, corresponding activations, corresponding error to that dataset and corrects to network
@@ -216,10 +204,8 @@ impl<'a> Network<'a> {
 
             for i in 0..layer.ndc {
 
-                // layer.bias[i] += dlt[off][i] * lr;
                 layer.bias[i] += dlt[dlt_off + i] * lr;
                 for j in 0..layer.n {
-                    // layer.nodes[j].w[i] += actv[off+1][j] * dlt[off][i] * lr;
                     layer.nodes[j].w[i] += actv[off - layer.n + j] * dlt[dlt_off + i] * lr;
                 }
             }
@@ -231,10 +217,8 @@ impl<'a> Network<'a> {
 
         for i in 0..last_layer.ndc  {
 
-            // last_layer.bias[i] += dlt[off][i] * lr;
             last_layer.bias[i] += dlt[dlt_off + i] * lr;
             for j in 0..last_layer.n {
-                // last_layer.nodes[j].w[i] += input[j] * dlt[off][i] * lr;
                 last_layer.nodes[j].w[i] += input[j] * dlt[dlt_off + i] * lr;
             }
         }
@@ -320,10 +304,10 @@ impl<'a> Network<'a> {
     ///`lr` => `lr` field in the `learn` method 
     /// 
     ///`batch_size` => batch size
-    pub fn multthrd_learn(&mut self, max_workers: usize, train_data: Arc<&Vec<f64>>, correct: Arc<&Vec<f64>>, epochs: usize, lr: f64, batch_size: usize) {
+    pub fn multthrd_learn(&mut self, max_workers: usize, mut train_data: Vec<f64>, mut correct: Vec<f64>, epochs: usize, lr: f64, batch_size: usize) {
 
         assert!(max_workers > 1 && max_workers < usize::from(std::thread::available_parallelism().unwrap()), "max_workers was zero or the number exceeded number of physical procesors");
-        //check if power of two
+        //check if the number is a power of two
         assert!(batch_size >= 1 && (batch_size & (batch_size - 1) == 0));
 
         let amount_input = train_data.len() / self.shape_in;
@@ -331,35 +315,62 @@ impl<'a> Network<'a> {
 
         assert!((amount_input == amount_correct), "Number of elements in input and labels doesn't match, {} {}", amount_input, amount_correct);
 
-        let batch_workers = batch_size*max_workers;
-        let thread_iters = amount_input / batch_workers;
-        let iters_left = amount_input % batch_workers;
+        let batch_iters = train_data.len() / (batch_size*self.shape_in);
+        let thread_iters = batch_iters / max_workers;
+        let iters_left = amount_input % batch_iters;
         let pool = rust_thread_pool::pool::ThreadPool::new(max_workers);
-        let mut pool_vectors: Vec<std::sync::Arc<Mutex<Vec<f64>>>> = Vec::with_capacity(max_workers);
+        let mut thread_output: Vec<Arc<Mutex<ThreadDatSync<Vec<f64>>>>> = Vec::with_capacity(max_workers);
+        let mut rng = thread_rng();
 
         for i in 0..max_workers {
 
-            pool_vectors.push(Arc::new(Mutex::new(Vec::with_capacity(self.nodes_total*batch_size))));
+            thread_output.push(Arc::new(Mutex::new(ThreadDatSync::new(Vec::with_capacity(self.nodes_total*batch_size)))));
 
-            let x = &pool_vectors[i];
+            let x = &thread_output[i];
             unsafe { 
                 let mut lock = x.lock().unwrap();
-                lock.set_len(self.nodes_total*batch_size);
+                lock.dat.set_len(self.nodes_total*batch_size);
             }
         }
-
         for e in 0..epochs {
+
             for elm in 0..thread_iters {
                 for thitr in 0..max_workers {
 
-                    let vector = Arc::clone(&pool_vectors[elm]);
+                    let output = Arc::clone(&thread_output[elm]);
+                    let (start, end) = (elm*max_workers*self.shape_in + self.shape_in*thitr, elm*max_workers*self.shape_in + self.shape_in*(thitr + 1));
+                    let arc_train = Arc::new(&train_data[start..end]);
+
                     pool.execute(move || {
 
-                        let lock = vector.lock();
+                        //"lock" thread output object so that we can keep them in sync and avoid bugs 
+                        let out = &mut output.lock().unwrap();
+                        println!("{:?}", &arc_train[start..end]);
+                        out.dat.push(1.0);
 
+                        std::mem::drop(out);
                     });
                 }
+
+                //wait for all threads to finish
+                let mut sync = max_workers;
+                while sync > 0 {
+
+                    sync = max_workers;
+                    for x in &thread_output {
+                        
+                        match x.try_lock() {
+                            Ok(_) => sync -= 1,
+                            Err(_) => (),
+                        }
+                    }
+                }
+
+                thread::sleep(Duration::from_millis(10));
+                println!("========================");
             }
+
+            self.helper_shuffle_in(&mut train_data, &mut correct, &mut rng);
         }
     }
 
