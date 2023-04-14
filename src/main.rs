@@ -1,3 +1,5 @@
+use std::sync::{RwLock,Arc};
+
 use network::Network;
 
 pub mod network;
@@ -12,8 +14,8 @@ fn main() {
 
     let inp = vec![1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
     let expc = vec![0.0, 0.0, 1.0, 1.0];
-    let inp_stat = inp.clone();
-    let expc_stat = expc.clone();
+    let inp_stat = Arc::new(RwLock::new(inp.clone()));
+    let expc_stat = Arc::new(RwLock::new(expc.clone()));
 
     network.multthrd_learn(4, inp_stat, expc_stat, 10000, 0.1, 1);
 

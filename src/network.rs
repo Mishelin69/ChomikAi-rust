@@ -1,5 +1,5 @@
 use core::time;
-use std::{sync::{Mutex, Arc}, thread, time::Duration};
+use std::{sync::{Mutex, Arc, self, RwLockWriteGuard}, thread, time::Duration};
 
 use rand::{rngs::ThreadRng, Rng, thread_rng};
 use rust_thread_pool;
@@ -40,6 +40,7 @@ impl<T> ThreadDatSync<T> {
 
 }
 
+#[derive(Clone)]
 pub struct Network<'a> {
 
     layers: Vec<Layer>,
@@ -304,23 +305,37 @@ impl<'a> Network<'a> {
     ///`lr` => `lr` field in the `learn` method 
     /// 
     ///`batch_size` => batch size
-    pub fn multthrd_learn(&mut self, max_workers: usize, mut train_data: Vec<f64>, mut correct: Vec<f64>, epochs: usize, lr: f64, batch_size: usize) {
+
+    pub fn multthrd_learn(&mut self, max_workers: usize, train_data: Arc<sync::RwLock<Vec<f64>>>, correct: Arc<sync::RwLock<Vec<f64>>>, epochs: usize, lr: f64, batch_size: usize) {
 
         assert!(max_workers > 1 && max_workers < usize::from(std::thread::available_parallelism().unwrap()), "max_workers was zero or the number exceeded number of physical procesors");
         //check if the number is a power of two
         assert!(batch_size >= 1 && (batch_size & (batch_size - 1) == 0));
 
-        let amount_input = train_data.len() / self.shape_in;
-        let amount_correct = correct.len() / self.shape_out;
+        let traindat_lock = {
+
+            if train_data.is_poisoned() {
+
+                panic!("Poisoned RwLock");
+            }
+
+            train_data.read().unwrap()
+
+        };
+
+        let amount_input = train_data.read().unwrap().len() / self.shape_in;
+        let amount_correct = correct.read().unwrap().len() / self.shape_out;
 
         assert!((amount_input == amount_correct), "Number of elements in input and labels doesn't match, {} {}", amount_input, amount_correct);
 
-        let batch_iters = train_data.len() / (batch_size*self.shape_in);
+        let batch_iters = traindat_lock.len() / (batch_size*self.shape_in);
         let thread_iters = batch_iters / max_workers;
         let iters_left = amount_input % batch_iters;
         let pool = rust_thread_pool::pool::ThreadPool::new(max_workers);
         let mut thread_output: Vec<Arc<Mutex<ThreadDatSync<Vec<f64>>>>> = Vec::with_capacity(max_workers);
         let mut rng = thread_rng();
+
+        std::mem::drop(traindat_lock);
 
         for i in 0..max_workers {
 
@@ -332,6 +347,9 @@ impl<'a> Network<'a> {
                 lock.dat.set_len(self.nodes_total*batch_size);
             }
         }
+
+        let self_arc = Arc::new(self.cop);
+
         for e in 0..epochs {
 
             for elm in 0..thread_iters {
@@ -339,14 +357,16 @@ impl<'a> Network<'a> {
 
                     let output = Arc::clone(&thread_output[elm]);
                     let (start, end) = (elm*max_workers*self.shape_in + self.shape_in*thitr, elm*max_workers*self.shape_in + self.shape_in*(thitr + 1));
-                    let arc_train = Arc::new(&train_data[start..end]);
+                    let arc_train = Arc::clone(&train_data);
+                    let self_arc = Arc::clone(&self_arc);
 
                     pool.execute(move || {
 
                         //"lock" thread output object so that we can keep them in sync and avoid bugs 
                         let out = &mut output.lock().unwrap();
-                        println!("{:?}", &arc_train[start..end]);
-                        out.dat.push(1.0);
+                        println!("{:?}", &arc_train.read().unwrap()[start..end]);
+
+                        self_arc.shape_in;
 
                         std::mem::drop(out);
                     });
@@ -364,13 +384,16 @@ impl<'a> Network<'a> {
                             Err(_) => (),
                         }
                     }
+                    println!("SYNC: {}", sync);
                 }
 
                 thread::sleep(Duration::from_millis(10));
                 println!("========================");
             }
 
-            self.helper_shuffle_in(&mut train_data, &mut correct, &mut rng);
+            println!("PUK");
+            self.helper_shuffle_in_rw(train_data.write().unwrap(), correct.write().unwrap(), &mut rng);
+            println!("MEGA");
         }
     }
 
@@ -390,6 +413,30 @@ impl<'a> Network<'a> {
 
             for x in 0..*self.shape_in {
                 arg1.swap(random_indx*self.shape_in + x, i*self.shape_in + x);
+            }
+
+            for y in 0..*self.shape_out {
+                arg2.swap(random_indx*self.shape_out + y, i*self.shape_out + y);
+            }
+
+        }
+
+    }
+
+    fn helper_shuffle_in_rw(&self, mut arg1: RwLockWriteGuard<Vec<f64>>, mut arg2: RwLockWriteGuard<Vec<f64>>, rng: &mut ThreadRng) {
+
+        println!("GARLIC");
+        let el_am: usize = arg1.len() / self.shape_in;
+        for i in 0..el_am {
+
+            let random_indx: usize = rng.gen_range(0..el_am-i) + i;
+
+            for x in 0..*self.shape_in {
+                arg1.swap(random_indx*self.shape_in + x, i*self.shape_in + x);
+                //let swp = arg1[random_indx*self.shape_in + x];
+                //arg1[random_indx*self.shape_in + x] = arg1[i*self.shape_in + x];
+                //arg1[i*self.shape_in + x] = swp;
+
             }
 
             for y in 0..*self.shape_out {
