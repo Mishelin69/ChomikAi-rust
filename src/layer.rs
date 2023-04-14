@@ -2,6 +2,7 @@ use rand::{rngs::ThreadRng, Rng};
 
 use crate::{node::Node, func::{FunctionPair, FnOption}};
 
+#[derive(Clone)]
 pub struct Layer {
 
     pub nodes: Vec<Node>,

@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct FunctionPair {
 
     pub actv: fn(f64) -> f64,

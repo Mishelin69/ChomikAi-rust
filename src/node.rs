@@ -1,5 +1,6 @@
 use rand::{rngs::ThreadRng, Rng};
 
+#[derive(Clone)]
 pub struct Node {
 
     pub w: Vec<f64>,

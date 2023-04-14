@@ -41,32 +41,32 @@ impl<T> ThreadDatSync<T> {
 }
 
 #[derive(Clone)]
-pub struct Network<'a> {
+pub struct Network {
 
     layers: Vec<Layer>,
     layers_total: usize,
 
     pub nodes_total: usize,
 
-    pub shape: &'a [usize],
-    pub shape_in: &'a usize,
-    pub shape_out: &'a usize,
+    pub shape: Vec<usize>,
+    pub shape_in: usize,
+    pub shape_out: usize,
 
 }
 
-impl<'a> Network<'a> {
+impl Network {
 
     ///Creates `not initialized` network with the giver parameters
     /// 
     ///`network shape` => should represent layers in the order left to right 
-    pub fn new(network_shape: &'a [usize]) -> Network<'a> {
+    pub fn new(network_shape: &[usize]) -> Network {
         Network { 
             layers: Vec::with_capacity(network_shape.len()), 
             layers_total: network_shape.len()-1,
             nodes_total: (network_shape.iter().sum::<usize>()) - network_shape[0],
-            shape: network_shape, 
-            shape_in: &network_shape[0], 
-            shape_out: &network_shape[network_shape.len()-1],
+            shape: network_shape.to_vec(), 
+            shape_in: network_shape[0], 
+            shape_out: network_shape[network_shape.len()-1],
         } 
     }
 
@@ -348,17 +348,16 @@ impl<'a> Network<'a> {
             }
         }
 
-        let self_arc = Arc::new(self.cop);
-
         for e in 0..epochs {
 
+            let self_copy = Arc::new(self.clone());
             for elm in 0..thread_iters {
                 for thitr in 0..max_workers {
 
                     let output = Arc::clone(&thread_output[elm]);
                     let (start, end) = (elm*max_workers*self.shape_in + self.shape_in*thitr, elm*max_workers*self.shape_in + self.shape_in*(thitr + 1));
                     let arc_train = Arc::clone(&train_data);
-                    let self_arc = Arc::clone(&self_arc);
+                    let self_arc = Arc::clone(&self_copy);
 
                     pool.execute(move || {
 
@@ -384,10 +383,9 @@ impl<'a> Network<'a> {
                             Err(_) => (),
                         }
                     }
-                    println!("SYNC: {}", sync);
                 }
 
-                thread::sleep(Duration::from_millis(10));
+                //thread::sleep(Duration::from_millis(10));
                 println!("========================");
             }
 
@@ -411,11 +409,11 @@ impl<'a> Network<'a> {
 
             let random_indx: usize = rng.gen_range(0..el_am-i) + i;
 
-            for x in 0..*self.shape_in {
+            for x in 0..self.shape_in {
                 arg1.swap(random_indx*self.shape_in + x, i*self.shape_in + x);
             }
 
-            for y in 0..*self.shape_out {
+            for y in 0..self.shape_out {
                 arg2.swap(random_indx*self.shape_out + y, i*self.shape_out + y);
             }
 
@@ -431,7 +429,7 @@ impl<'a> Network<'a> {
 
             let random_indx: usize = rng.gen_range(0..el_am-i) + i;
 
-            for x in 0..*self.shape_in {
+            for x in 0..self.shape_in {
                 arg1.swap(random_indx*self.shape_in + x, i*self.shape_in + x);
                 //let swp = arg1[random_indx*self.shape_in + x];
                 //arg1[random_indx*self.shape_in + x] = arg1[i*self.shape_in + x];
@@ -439,7 +437,7 @@ impl<'a> Network<'a> {
 
             }
 
-            for y in 0..*self.shape_out {
+            for y in 0..self.shape_out {
                 arg2.swap(random_indx*self.shape_out + y, i*self.shape_out + y);
             }
 
