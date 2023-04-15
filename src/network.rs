@@ -29,13 +29,13 @@ pub fn make_flat_copy(v: &[Vec<f64>], expc_s: usize) -> Vec<f64> {
 }
 
 struct ThreadDatSync<T> {
-    pub dat: T,
+    pub dat: Mutex<T>,
 }
 
 impl<T> ThreadDatSync<T> {
 
     pub fn new(dat: T) -> ThreadDatSync<T> {
-        ThreadDatSync { dat }
+        ThreadDatSync { dat: Mutex::new(dat) }
     }
 
 }
@@ -47,6 +47,7 @@ pub struct Network {
     layers_total: usize,
 
     pub nodes_total: usize,
+    pub weights_total: usize,
 
     pub shape: Vec<usize>,
     pub shape_in: usize,
@@ -64,6 +65,13 @@ impl Network {
             layers: Vec::with_capacity(network_shape.len()), 
             layers_total: network_shape.len()-1,
             nodes_total: (network_shape.iter().sum::<usize>()) - network_shape[0],
+            weights_total: {
+                let mut s = 0;
+                for i in 0..network_shape.len()-1 {
+                    s += network_shape[i]*network_shape[i+1];
+                } 
+                s
+            },
             shape: network_shape.to_vec(), 
             shape_in: network_shape[0], 
             shape_out: network_shape[network_shape.len()-1],
@@ -225,6 +233,43 @@ impl Network {
         }
     }
 
+    fn sum_change(&mut self, input: &[f64], actv: &Vec<f64>, dlt: &Vec<f64>, lr: f64, nodes: &mut Vec<f64>, bias: &mut Vec<f64>) {
+
+        let mut layer_ref = self.layers.iter().rev();
+        let mut off: usize = self.nodes_total;
+        let mut dlt_off = 0;
+
+        let (mut nodes_off, mut bias_off): (usize, usize) = (0, 0);
+
+        for _ in 0..self.layers_total-1 {
+
+            let layer = layer_ref.next().unwrap();
+            off -= layer.ndc;
+
+            for i in 0..layer.ndc {
+
+                bias[bias_off + i] += dlt[dlt_off + i] * lr;
+                for j in 0..layer.n {
+                    nodes[nodes_off + j] += actv[off - layer.n + j] * dlt[dlt_off + i] * lr;
+                    nodes_off += layer.n;
+                }
+            }
+
+            bias_off += layer.ndc;
+            dlt_off += layer.ndc;
+        }
+
+        let last_layer = layer_ref.next().unwrap();
+
+        for i in 0..last_layer.ndc  {
+
+            bias[bias_off + i] += dlt[dlt_off + i] * lr;
+            for j in 0..last_layer.n {
+                nodes[nodes_off + j] += input[j] * dlt[dlt_off + i] * lr;
+            }
+        }
+    }
+
     ///Trains the network with the data supplied
     /// 
     ///`inp` => input
@@ -328,24 +373,22 @@ impl Network {
 
         assert!((amount_input == amount_correct), "Number of elements in input and labels doesn't match, {} {}", amount_input, amount_correct);
 
-        let batch_iters = traindat_lock.len() / (batch_size*self.shape_in);
+        let batch_iters = traindat_lock.len() / (batch_size*self.shape_in); //number of iters needed to iter through the whole Vector using batches
         let thread_iters = batch_iters / max_workers;
         let iters_left = amount_input % batch_iters;
+
         let pool = rust_thread_pool::pool::ThreadPool::new(max_workers);
-        let mut thread_output: Vec<Arc<Mutex<ThreadDatSync<Vec<f64>>>>> = Vec::with_capacity(max_workers);
+        let (thread_output, thread_delta) = Self::helper_create_delta_actv_multi(max_workers, self.nodes_total*batch_size);
         let mut rng = thread_rng();
 
+        //drop the lock so that we can obtain write lock in this thread
         std::mem::drop(traindat_lock);
 
-        for i in 0..max_workers {
+        let (mut sum_nodes, mut sum_bias) = (Vec::<f64>::with_capacity(self.weights_total), Vec::<f64>::with_capacity(self.nodes_total));
 
-            thread_output.push(Arc::new(Mutex::new(ThreadDatSync::new(Vec::with_capacity(self.nodes_total*batch_size)))));
-
-            let x = &thread_output[i];
-            unsafe { 
-                let mut lock = x.lock().unwrap();
-                lock.dat.set_len(self.nodes_total*batch_size);
-            }
+        unsafe {
+            sum_nodes.set_len(self.weights_total);
+            sum_bias.set_len(self.nodes_total);
         }
 
         for e in 0..epochs {
@@ -355,19 +398,60 @@ impl Network {
                 for thitr in 0..max_workers {
 
                     let output = Arc::clone(&thread_output[elm]);
-                    let (start, end) = (elm*max_workers*self.shape_in + self.shape_in*thitr, elm*max_workers*self.shape_in + self.shape_in*(thitr + 1));
-                    let arc_train = Arc::clone(&train_data);
+                    let delta = Arc::clone(&thread_delta[elm]);
+
+                    let (start, end) = (elm*max_workers + thitr, elm*max_workers + thitr + 1);
                     let self_arc = Arc::clone(&self_copy);
+
+                    let arc_train = Arc::clone(&train_data);
+                    let arc_crt = Arc::clone(&correct);
 
                     pool.execute(move || {
 
                         //"lock" thread output object so that we can keep them in sync and avoid bugs 
-                        let out = &mut output.lock().unwrap();
-                        println!("{:?}", &arc_train.read().unwrap()[start..end]);
+                        let mut dat_lock = match output.dat.lock() {
+                            Ok(v) => v,
+                            Err(e) => panic!("{}", e),
+                        };
 
-                        self_arc.shape_in;
+                        let mut dlt_lock = match delta.dat.lock() {
+                            Ok(v) => v,
+                            Err(e) => panic!("{}", e),
+                        };
 
-                        std::mem::drop(out);
+                        let read_train = {
+                            if arc_train.is_poisoned() {
+                                panic!("Cannot read from train");
+                            }
+                            arc_train.read().unwrap()
+                        };
+
+                        let read_correct = {
+                            if arc_crt.is_poisoned() {
+                                panic!("Cannot read from correct");
+                            }
+                            arc_crt.read().unwrap()
+                        };
+
+                        for i in 0..batch_size {
+
+                            self_arc.feedforward(
+                                &read_train[(start*self_arc.shape_in) + i*self_arc.shape_in..(start*self_arc.shape_in) + (i + 1)*self_arc.shape_in], 
+                                &mut dat_lock,
+                                i,
+                            ); 
+
+                            self_arc.calc_delta(
+                                &dat_lock, 
+                                &read_correct[(start*self_arc.shape_out) + i*self_arc.shape_out..(start*self_arc.shape_out) + (i + 1)*self_arc.shape_out], 
+                                &mut dlt_lock, 
+                                i+1,
+                            );
+
+                        }
+                        
+                        std::mem::drop(dat_lock);
+                        std::mem::drop(dlt_lock);
                     });
                 }
 
@@ -378,21 +462,49 @@ impl Network {
                     sync = max_workers;
                     for x in &thread_output {
                         
-                        match x.try_lock() {
-                            Ok(_) => sync -= 1,
-                            Err(_) => (),
+                        if !x.dat.is_poisoned() {
+                            sync -= 1;
                         }
                     }
                 }
 
-                //thread::sleep(Duration::from_millis(10));
-                println!("========================");
+                //sum up deltas
+                let read_inp = train_data.read().unwrap();
+            
+                for i in 0..max_workers {
+
+                    let read_actv = thread_output[i].dat.lock().unwrap();
+                    let read_dlt = thread_delta[i].dat.lock().unwrap();
+
+                    self.sum_change(&read_inp[elm*max_workers*self.shape_in + i*self.shape_in..elm*max_workers*self.shape_in + (i+1)*self.shape_in], &read_actv, &read_dlt, lr, &mut sum_nodes, &mut sum_bias);
+                }
+
+                std::mem::drop(read_inp);
             }
 
-            println!("PUK");
             self.helper_shuffle_in_rw(train_data.write().unwrap(), correct.write().unwrap(), &mut rng);
-            println!("MEGA");
         }
+    }
+
+    fn helper_create_delta_actv_multi(max_workers: usize, vec_size: usize) -> (Vec<Arc<ThreadDatSync<Vec<f64>>>>, Vec<Arc<ThreadDatSync<Vec<f64>>>>) {
+
+        let mut a = Vec::with_capacity(max_workers);
+        let mut d = Vec::with_capacity(max_workers);
+
+        for i in 0..max_workers {
+
+            a.push(Arc::new(ThreadDatSync::new(Vec::with_capacity(vec_size))));
+            d.push(Arc::new(ThreadDatSync::new(Vec::with_capacity(vec_size))));
+
+            let x = &a[i];
+            let y = &d[i];
+            unsafe { 
+                x.dat.lock().unwrap().set_len(vec_size);
+                y.dat.lock().unwrap().set_len(vec_size);
+            }
+        }
+
+        (a, d)
     }
 
     ///Helper function that shuffles the input while making sure the labels match the new order
@@ -418,12 +530,10 @@ impl Network {
             }
 
         }
-
     }
 
     fn helper_shuffle_in_rw(&self, mut arg1: RwLockWriteGuard<Vec<f64>>, mut arg2: RwLockWriteGuard<Vec<f64>>, rng: &mut ThreadRng) {
 
-        println!("GARLIC");
         let el_am: usize = arg1.len() / self.shape_in;
         for i in 0..el_am {
 
@@ -431,10 +541,6 @@ impl Network {
 
             for x in 0..self.shape_in {
                 arg1.swap(random_indx*self.shape_in + x, i*self.shape_in + x);
-                //let swp = arg1[random_indx*self.shape_in + x];
-                //arg1[random_indx*self.shape_in + x] = arg1[i*self.shape_in + x];
-                //arg1[i*self.shape_in + x] = swp;
-
             }
 
             for y in 0..self.shape_out {
@@ -442,7 +548,6 @@ impl Network {
             }
 
         }
-
     }
 
     ///Clears given vector
