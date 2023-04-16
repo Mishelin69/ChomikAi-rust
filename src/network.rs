@@ -251,8 +251,9 @@ impl Network {
                 bias[bias_off + i] += dlt[dlt_off + i] * lr;
                 for j in 0..layer.n {
                     nodes[nodes_off + j] += actv[off - layer.n + j] * dlt[dlt_off + i] * lr;
-                    nodes_off += layer.n;
                 }
+
+                nodes_off += layer.n;
             }
 
             bias_off += layer.ndc;
@@ -267,7 +268,10 @@ impl Network {
             for j in 0..last_layer.n {
                 nodes[nodes_off + j] += input[j] * dlt[dlt_off + i] * lr;
             }
+
+            nodes_off += last_layer.n;
         }
+        println!("NODES_OFF: {}", nodes_off);
     }
 
     ///Trains the network with the data supplied
@@ -384,23 +388,21 @@ impl Network {
         //drop the lock so that we can obtain write lock in this thread
         std::mem::drop(traindat_lock);
 
-        let (mut sum_nodes, mut sum_bias) = (Vec::<f64>::with_capacity(self.weights_total), Vec::<f64>::with_capacity(self.nodes_total));
+        let (mut sum_nodes, mut sum_bias) = (Vec::<f64>::new(), Vec::<f64>::new());
 
-        unsafe {
-            sum_nodes.set_len(self.weights_total);
-            sum_bias.set_len(self.nodes_total);
-        }
+        sum_nodes.resize(self.weights_total, 0_f64);
+        sum_bias.resize(self.nodes_total, 0_f64);
 
-        for e in 0..epochs {
+        for _ in 0..epochs {
 
             let self_copy = Arc::new(self.clone());
             for elm in 0..thread_iters {
                 for thitr in 0..max_workers {
 
-                    let output = Arc::clone(&thread_output[elm]);
-                    let delta = Arc::clone(&thread_delta[elm]);
+                    let output = Arc::clone(&thread_output[thitr]);
+                    let delta = Arc::clone(&thread_delta[thitr]);
 
-                    let (start, end) = (elm*max_workers + thitr, elm*max_workers + thitr + 1);
+                    let (start, end) = (elm*max_workers*batch_size + thitr*batch_size, elm*max_workers*batch_size + thitr*batch_size + batch_size);
                     let self_arc = Arc::clone(&self_copy);
 
                     let arc_train = Arc::clone(&train_data);
@@ -476,7 +478,11 @@ impl Network {
                     let read_actv = thread_output[i].dat.lock().unwrap();
                     let read_dlt = thread_delta[i].dat.lock().unwrap();
 
-                    self.sum_change(&read_inp[elm*max_workers*self.shape_in + i*self.shape_in..elm*max_workers*self.shape_in + (i+1)*self.shape_in], &read_actv, &read_dlt, lr, &mut sum_nodes, &mut sum_bias);
+                    let (start, end) = (elm*max_workers*batch_size + i*batch_size, elm*max_workers*batch_size + i*batch_size + batch_size);
+
+                    for j in 0..batch_size {
+                        self.apply_change(&read_inp[start*self.shape_in + j*self.shape_in..start*self.shape_in + (j + 1)*self.shape_in], &read_actv, &read_dlt, j+1, lr);
+                    }
                 }
 
                 std::mem::drop(read_inp);
